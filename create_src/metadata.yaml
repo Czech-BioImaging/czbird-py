@@ -1,0 +1,496 @@
+# CzBIRD metadata model — NRP Invenio schema
+# Converted from metadata.yaml (human-readable specification)
+#
+# Inheritance ($ProcessingStep, $MethodsAndTools) is flattened into
+# each concrete type since NRP has no inheritance mechanism.
+#
+# The $Resource -> $RelatedResource relation is flattened into a shortcut
+# entity $ResourceAnnotation (which exists only here, it is not present
+# in the official model), and it is referenced in the relevant types (not
+# flattened/pasted into them like it is with the $ProcessingStep). Only
+# the original (model's) Resource.Title is flattened into the types,
+# allowing the types to use their own names variant for it.
+#
+# Naming:
+#   custom types use PascalCase with CZBIRD prefix;
+#   property names use snake_case.
+
+# ---------------------------------------------------------------------------
+# Leaf types (no dependencies on other CZBIRD types)
+# ---------------------------------------------------------------------------
+
+CZBIRDOntologyTerm:
+  type: object
+  properties:
+    ontology_name:
+      type: keyword
+      required: true
+    ontology_version:
+      type: keyword
+      required: true
+    term_label:
+      type: keyword
+      required: true
+    term_iri:
+      type: keyword
+      required: true
+    term_is_definite:
+      type: boolean
+      required: true
+
+CZBIRDDigitalObjectSink:
+  # Resource.title is replaced here by data_label
+  type: object
+  properties:
+    data_path:
+      type: keyword
+      required: true
+
+CZBIRDDigitalImageSink:
+  # Resource.title is replaced here by images_label
+  type: object
+  properties:
+    images_path:
+      type: keyword
+      required: true
+    images_metadata_kv_pairs:
+      # optional
+      # format: "key1=value1;key2=value2;..." — all metadata from uploaded image files
+      type: keyword
+
+# ---------------------------------------------------------------------------
+# Biological identity chain: OntologyTerm → Taxon → Organism → Specimen
+# ---------------------------------------------------------------------------
+
+CZBIRDTaxon:
+  type: object
+  properties:
+    accepted_scientific_name:
+      type: CZBIRDOntologyTerm
+      required: true
+    taxon_rank:
+      # redundant but mandatory; value comes from the IRI of accepted_scientific_name
+      type: CZBIRDOntologyTerm
+      required: true
+
+CZBIRDOrganism:
+  type: object
+  properties:
+    belongs_to:
+      type: CZBIRDTaxon
+      required: true
+
+CZBIRDSpecimen:
+  # Flattened from $Resource + Specimen-specific fields
+  type: object
+  properties:
+    title:
+      # optional
+      type: fulltext+keyword
+    is_part_of_organism:
+      type: CZBIRDOrganism
+      required: true
+    is_part_of:
+      # ordered list from largest to smallest component; first element = "Specimen is",
+      # subsequent elements = "Specimen part of"
+      type: array
+      items:
+        type: CZBIRDOntologyTerm
+      min_items: 1
+      required: true
+    date_of_collection:  # only here to match with Figma_v1.2, but slatted for removal
+      type: keyword
+    place_of_collection: # only here to match with Figma_v1.2, but slatted for removal
+      type: keyword
+    additional_note:
+      # optional
+      type: array
+      items:
+        type: fulltext
+      # the array itself is not required; but
+      # if it is present, it has to contain something
+      min_items: 1
+
+# ---------------------------------------------------------------------------
+# Method and Tool (both flatten $MethodsAndTools which flattens $Resource)
+# with OneOf [name+description] / [URL] attribute
+# ---------------------------------------------------------------------------
+
+CZBIRDMethod:
+  type: object
+  properties:
+    method_type_label:
+      type: array
+      items:
+        type: CZBIRDOntologyTerm
+      min_items: 1
+      required: true
+    additional_note:
+      # optional
+      # this is an additional (and optional) clarification of the ontology term
+      type: array
+      items:
+        type: fulltext
+      # the array itself is not required; but
+      # if it is present, it has to contain something
+      min_items: 1
+
+CZBIRDTool:
+  type: object
+  properties:
+    is_software:
+      type: boolean
+      required: true
+    tool_description:
+      type: polymorphic
+      discriminator: description_type
+      required: true
+      oneof:
+        - discriminator: explicit_description
+          type: CZBIRDFulltextDescription
+        - discriminator: reference_to_description
+          type: CZBIRDReference
+          # this variant has strong overlap with this.additional_annotation.resource_url
+    additional_note:
+      # optional
+      type: array
+      items:
+        type: fulltext
+      # the array itself is not required; but
+      # if it is present, it has to contain something
+      min_items: 1
+
+CZBIRDFulltextDescription:
+  type: object
+  properties:
+    description_type:
+      type: keyword
+      required: true
+    title:
+      type: fulltext+keyword
+      required: true
+    description:
+      type: fulltext
+      required: true
+
+CZBIRDReference:
+  type: object
+  properties:
+    description_type:
+      type: keyword
+      required: true
+    url:
+      type: keyword
+      required: true
+
+# ---------------------------------------------------------------------------
+# Processing steps (all flatten $ProcessingStep which has label/method/tool)
+# ---------------------------------------------------------------------------
+
+CZBIRDSamplePreparationStep:
+  type: object
+  properties:
+    step_label:
+      type: keyword
+      required: true
+    realizes_method:
+      type: CZBIRDMethod
+      required: true
+    employs_tool:
+      type: array
+      items:
+        type: CZBIRDTool
+      # min_items: 1 --> this step can be defined w/o a tool !!
+      required: true
+    aux_digital_object:
+      # optional, processing "side-effect" files, e.g.,
+      # room temperature, atm. pressure record, etc.
+      type: array
+      items:
+        type: CZBIRDDigitalObjectSink
+      # the array itself is not required; but
+      # if it is present, it has to contain something
+      min_items: 1
+
+CZBIRDImageAcquisitionStep:
+  type: object
+  properties:
+    step_label:
+      type: keyword
+      required: true
+    realizes_method:
+      type: CZBIRDMethod
+      required: true
+    employs_tool:
+      type: array
+      items:
+        type: CZBIRDTool
+      min_items: 1
+      required: true
+    aux_digital_object:
+      # optional, processing "side-effect" files, e.g. log files
+      type: array
+      items:
+        type: CZBIRDDigitalObjectSink
+        # how to fill this sink item?
+        # ObjectSink.data_label = the UI's Sample name plus " aux data"
+        # ObjectSink.data_path = specimen_name/sample_name/imaging_name/additional_files
+        # ObjectSink.additional_annotation = None/null (for now)
+      # the array itself is not required; but
+      # if it is present, it has to contain something
+      min_items: 1
+    main_digital_image:
+      # mandatory, and at least one
+      # (assuming! scopes are not producing aux debug images)
+      type: array
+      items:
+        type: CZBIRDDigitalImageSink
+        # how to fill this sink item?
+        # ImageSink.images_label = the UI's Sample name plus " acquired images"
+        # ImageSink.images_path = specimen_name/sample_name/imaging_name/images
+        # ImageSink.images_metadata_kv_pairs = '' (for now)
+        # ImageSink.additional_annotation = None/null (for now)
+      min_items: 1
+      required: true
+
+CZBIRDImageProcessingStep:
+  # represents a step whose primary purpose is to produce another
+  # batch of images that either is an input to another such step,
+  # or is recorded in CZBIRDProcessedPipeline.result_data_images
+  #
+  # (attrib-wise it is the same as CZBIRDImageAnalysisStep)
+  type: object
+  properties:
+    step_label:
+      type: keyword
+      required: true
+    realizes_method:
+      type: CZBIRDMethod
+      required: true
+    employs_tool:
+      type: array
+      items:
+        type: CZBIRDTool
+      min_items: 1
+      required: true
+    aux_digital_object:
+      # optional, processing "side-effect" files, e.g. log files
+      type: array
+      items:
+        type: CZBIRDDigitalObjectSink
+      # the array itself is not required; but
+      # if it is present, it has to contain something
+      min_items: 1
+    aux_digital_image:
+      # optional, processing "side-effect" files, e.g. debug images
+      type: array
+      items:
+        type: CZBIRDDigitalImageSink
+      # the array itself is not required; but
+      # if it is present, it has to contain something
+      min_items: 1
+
+CZBIRDImageAnalysisStep:
+  # represents a step whose primary purpose is to extract information
+  # out of (implicit) input image(s) and save this information
+  # in a form of CZBIRDAnalysedPipeline.result_data_objects or
+  # CZBIRDAnalysedPipeline.result_data_images
+  #
+  # (attrib-wise it is the same as CZBIRDImageProcessingStep)
+  type: object
+  properties:
+    step_label:
+      type: keyword
+      required: true
+    realizes_method:
+      type: CZBIRDMethod
+      required: true
+    employs_tool:
+      type: array
+      items:
+        type: CZBIRDTool
+      min_items: 1
+      required: true
+    aux_digital_object:
+      # optional, processing "side-effect" files, e.g. log files
+      type: array
+      items:
+        type: CZBIRDDigitalObjectSink
+      # the array itself is not required; but
+      # if it is present, it has to contain something
+      min_items: 1
+    aux_digital_image:
+      # optional, processing "side-effect" files, e.g. debug images
+      type: array
+      items:
+        type: CZBIRDDigitalImageSink
+      # the array itself is not required; but
+      # if it is present, it has to contain something
+      min_items: 1
+
+# ---------------------------------------------------------------------------
+# Profile content types (the actual pipelines carried by each profile)
+# ---------------------------------------------------------------------------
+
+CZBIRDRawPipeline:
+  type: object
+  properties:
+    specimen:
+      type: CZBIRDSpecimen
+      required: true
+    sample_preparation_step:
+      # optional
+      type: array
+      items:
+        type: CZBIRDSamplePreparationStep
+      # the array itself is not required; but
+      # if it is present, it has to contain something
+      min_items: 1
+    image_acquisition_step:
+      type: array
+      items:
+        type: CZBIRDImageAcquisitionStep
+      min_items: 1
+      required: true
+
+CZBIRDProcessedPipeline:
+  type: object
+  properties:
+    input_data_url:
+      type: array
+      items:
+        # PID, that's URL-like, to input image data
+        # Invenio internal ref (qqqqq-wwwww) alone is URI/IRI,
+        #         so it must be used with full hostname...
+        type: keyword
+      min_items: 1
+      required: true
+    image_processing_step:
+      # steps listed in execution order
+      type: array
+      items:
+        type: CZBIRDImageProcessingStep
+      min_items: 1
+      required: true
+    result_data_image:
+      # end-result images of the whole pipeline (intermediate outputs live in Steps)
+      type: array
+      items:
+        type: CZBIRDDigitalImageSink
+      min_items: 1
+      required: true
+
+CZBIRDAnalysedPipeline:
+  type: object
+  properties:
+    input_data_url:
+      type: array
+      items:
+        # PID, that's URL-like, to input image data
+        # Invenio internal ref (qqqqq-wwwww) alone is URI/IRI,
+        #         so it must be used with full hostname...
+        type: keyword
+      min_items: 1
+      required: true
+    image_processing_step:
+      # optional pre-analysis processing; listed in execution order
+      type: array
+      items:
+        type: CZBIRDImageProcessingStep
+      # the array itself is not required; but
+      # if it is present, it has to contain something
+      min_items: 1
+    image_analysis_step:
+      # listed in execution order
+      type: array
+      items:
+        type: CZBIRDImageAnalysisStep
+      min_items: 1
+      required: true
+    result_data_object:
+      # end-result non-image outputs; result_data_objects + result_data_images combined >= 1
+      type: array
+      items:
+        type: CZBIRDDigitalObjectSink
+      required: true
+    result_data_image:
+      # end-result image outputs; result_data_objects + result_data_images combined >= 1
+      type: array
+      items:
+        type: CZBIRDDigitalImageSink
+      required: true
+
+# ---------------------------------------------------------------------------
+# Record profiles — discriminated via profile_type for the polymorphic field
+# ---------------------------------------------------------------------------
+
+CZBIRDRawDataProfile:
+  type: object
+  properties:
+    profile_type:
+      type: keyword
+      required: true
+    raw_data_acquisition:
+      type: array
+      items:
+        type: CZBIRDRawPipeline
+      min_items: 1
+      required: true
+
+CZBIRDProcessedDataProfile:
+  type: object
+  properties:
+    profile_type:
+      type: keyword
+      required: true
+    data_processing:
+      type: array
+      items:
+        type: CZBIRDProcessedPipeline
+      min_items: 1
+      required: true
+
+CZBIRDAnalysedDataProfile:
+  type: object
+  properties:
+    profile_type:
+      type: keyword
+      required: true
+    data_analysing:
+      type: array
+      items:
+        type: CZBIRDAnalysedPipeline
+      min_items: 1
+      required: true
+
+CZBIRDGeneralRecordProfile:
+  # No extra metadata beyond the top-level Metadata fields and CCMM/RO-Crate data
+  type: object
+  properties:
+    profile_type:
+      type: keyword
+      required: true
+
+# ---------------------------------------------------------------------------
+# Root metadata blueprint
+# ---------------------------------------------------------------------------
+
+Metadata:
+  properties:
+    internal_record_title:
+      type: fulltext+keyword
+      required: true
+    was_generated_by:
+      # exactly one profile must be chosen; profile_type is the discriminator
+      type: polymorphic
+      discriminator: profile_type
+      required: true
+      oneof:
+        - discriminator: raw_data
+          type: CZBIRDRawDataProfile
+        - discriminator: processed_data
+          type: CZBIRDProcessedDataProfile
+        - discriminator: analysed_data
+          type: CZBIRDAnalysedDataProfile
+        - discriminator: general_record
+          type: CZBIRDGeneralRecordProfile
