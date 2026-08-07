@@ -122,6 +122,10 @@ class CzbirdDialog(QDialog):
 
         self._build_fields()
 
+        self._status = QLabel("")
+        self._status.setWordWrap(True)
+        outer.addWidget(self._status)
+
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
         for label, slot in (("Apply", self._on_apply),
@@ -131,6 +135,11 @@ class CzbirdDialog(QDialog):
             b.clicked.connect(slot)
             btn_row.addWidget(b)
         outer.addLayout(btn_row)
+
+    def _set_status(self, text: str, ok: bool = True) -> None:
+        self._status.setText(text)
+        self._status.setStyleSheet(
+            "color:#2e7d32;" if ok else "color:#c62828;")
 
     # ---- build -------------------------------------------------------- #
     def _build_fields(self):
@@ -257,8 +266,9 @@ class CzbirdDialog(QDialog):
                     if len(lst) > min_required:
                         lst.remove(o); render()
                     else:
-                        QMessageBox.information(self, "Cannot remove",
-                            f"At least {min_required} item(s) must remain.")
+                        self._set_status(
+                            f"At least {min_required} item(s) must remain.",
+                            ok=False)
                 db.clicked.connect(_rm)
                 rh.addWidget(db)
                 rows_l.addWidget(r)
@@ -302,8 +312,7 @@ class CzbirdDialog(QDialog):
         try:
             rebuilt = type(self.obj).model_validate(self._collect())
         except ValidationError as e:
-            QMessageBox.warning(self, "Validation failed",
-                "This object is not valid yet:\n\n" + _fmt_errors(e))
+            self._set_status("Not valid yet:\n" + _fmt_errors(e), ok=False)
             return False
         # copy validated field values back into the live object (in place)
         for name in type(self.obj).model_fields:
@@ -312,7 +321,7 @@ class CzbirdDialog(QDialog):
 
     def _on_apply(self):
         if self._apply():
-            QMessageBox.information(self, "Applied", "Changes are valid and applied.")
+            self._set_status("Changes are valid and applied.", ok=True)
 
     def _on_ok(self):
         if self._apply():
@@ -368,8 +377,9 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    MainWindow().show()
-    sys.exit(app.exec())
+    win = MainWindow()      # keep a reference: an unreferenced top-level widget
+    win.show()              # can be garbage-collected, destroying the window and
+    sys.exit(app.exec())    # leaving app.exec() running with nothing on screen.
 
 
 if __name__ == "__main__":
